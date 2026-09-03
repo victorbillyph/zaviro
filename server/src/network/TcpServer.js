@@ -533,6 +533,9 @@ class TcpGameServer {
                     player.updateFromInput(client.lastInput, 1 / this.tickRate);
                 }
 
+                // Run physics (gravity + ground collision)
+                universe.world.physicsStep(1 / this.tickRate);
+
                 // Send world updates to all players in this universe
                 const players = {};
                 for (const [pid, player] of universe.world.players) {

@@ -8,15 +8,14 @@ Player::Player(uint64_t id, const std::string& name)
 }
 
 void Player::update(float dt) {
-    // Apply gravity
-    m_velocity.y += gravity * dt;
+    // Gravity + ground collision is handled by the server.
+    // Client only applies horizontal movement for immediate response.
+    // Vertical position is reconciled via server WORLD_UPDATE.
 
-    // Integrate vertical position
-    transform.position.y += m_velocity.y * dt;
-
-    // Ground collision (terrain is a heightmap)
+    // Still apply ground clamp locally to prevent falling through terrain
+    // while waiting for server position update.
     float groundY = heightAt(transform.position.x, transform.position.z) + height;
-    if (transform.position.y <= groundY) {
+    if (transform.position.y < groundY) {
         transform.position.y = groundY;
         m_velocity.y = 0.0f;
         m_grounded = true;
@@ -46,11 +45,11 @@ void Player::move(float forward, float right, float jump, float dt) {
         sinf(yawRad - 3.14159f/2.0f)
     }.normalized();
 
-    // Horizontal movement (flattened to ground plane, no fly)
+    // Store input for sending to server (server is authoritative for position)
     Vec3 wishDir = frontH * forward + rightVec * right;
     float wishLen = sqrtf(wishDir.x*wishDir.x + wishDir.z*wishDir.z);
     if (wishLen > 1.0f) {
-        wishDir = wishDir * (1.0f / wishLen); // normalize
+        wishDir = wishDir * (1.0f / wishLen);
     }
 
     m_velocity.x = wishDir.x * speed;
@@ -61,9 +60,9 @@ void Player::move(float forward, float right, float jump, float dt) {
         m_velocity.y = jumpVelocity;
         m_grounded = false;
     }
-
-    transform.position.x += m_velocity.x * dt;
-    transform.position.z += m_velocity.z * dt;
+    // NOTE: position.x/z/y is NOT updated here.
+    // Server computes position from input and sends it back via WORLD_UPDATE.
+    // Client only reconciles vertical via ground clamp in update().
 }
 
 void Player::setMouseDelta(float dx, float dy) {
