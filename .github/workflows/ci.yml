@@ -86,12 +86,6 @@ jobs:
           name: zaviro-client-linux
           path: release
 
-      - name: Download server artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: zaviro-server
-          path: server-release
-
       - name: Package artifacts
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
@@ -99,10 +93,8 @@ jobs:
           mkdir -p dist/client
           cp release/zaviro_client dist/client/
           tar czf zaviro-client-linux-${VERSION}.tar.gz -C dist client
-          # Server tarball (exclude node_modules, reinstall on target)
-          tar czf zaviro-server-${VERSION}.tar.gz -C server-release server --exclude='node_modules'
-          # Combined README
-          cp README.md dist/ 2>/dev/null || true
+          # Server tarball (from repo source, exclude node_modules)
+          tar czf zaviro-server-${VERSION}.tar.gz server --exclude='server/node_modules'
           ls -la *.tar.gz
 
       - name: Create Release
