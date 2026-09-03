@@ -143,7 +143,7 @@ jobs:
           chmod +x "$BUNDLE/zaviro_client"
 
           # Server
-          cp -r artifacts/zaviro-server/server "$BUNDLE/"
+          cp -r artifacts/zaviro-server "$BUNDLE/server"
 
           # Tor (if available on system)
           if [ -x /usr/bin/tor ]; then
@@ -179,7 +179,7 @@ jobs:
           cp artifacts/zaviro-client-windows/zaviro_client.exe "$BUNDLE/" 2>/dev/null || true
 
           # Server
-          cp -r artifacts/zaviro-server/server "$BUNDLE/"
+          cp -r artifacts/zaviro-server "$BUNDLE/server"
 
           # Start scripts
           cat > "$BUNDLE/start-server.bat" << 'BATSRV'
