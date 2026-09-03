@@ -79,18 +79,20 @@ bool Window::shouldClose() const {
 }
 
 void Window::pollEvents() {
-    // Snapshot previous key states (so isKeyJustPressed compares last frame)
+    // Save previous key states BEFORE glfwPollEvents so isKeyJustPressed works
     m_prevKeys.clear();
     for (int k = GLFW_KEY_SPACE; k <= GLFW_KEY_LAST; k++) {
         if (glfwGetKey(m_window, k) == GLFW_PRESS) m_prevKeys.insert(k);
     }
-    m_typedText.clear();
 
-    glfwPollEvents();
-
+    // Save previous mouse button states BEFORE glfwPollEvents
     m_prevMouseBtn[0] = glfwGetMouseButton(m_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     m_prevMouseBtn[1] = glfwGetMouseButton(m_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     m_prevMouseBtn[2] = glfwGetMouseButton(m_window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+
+    m_typedText.clear();
+
+    glfwPollEvents();
 }
 
 void Window::beginFrameInput() {

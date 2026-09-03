@@ -422,6 +422,11 @@ void Engine::run() {
 // ============ LOBBY ============
 
 void Engine::runLobby() {
+    // Ensure cursor is visible in lobby (fixes click detection)
+    if (m_window->isCursorDisabled()) {
+        m_window->setCursorDisabled(false);
+    }
+
     // Mouse position for hover detection
     double mx, my;
     m_window->getMousePosition(mx, my);
