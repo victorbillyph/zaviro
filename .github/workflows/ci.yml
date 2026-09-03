@@ -1,0 +1,116 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-client:
+    name: Build Client (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libglfw3-dev libglm-dev nlohmann-json3-dev xorg-dev libxkbcommon-dev
+
+      - name: Configure CMake
+        run: cmake -S client -B client/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build client/build --config Release -j$(nproc)
+
+      - name: Upload client artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zaviro-client-linux
+          path: client/build/zaviro_client
+
+  build-server:
+    name: Build Server (Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Syntax check
+        working-directory: server
+        run: |
+          for f in $(find src -name '*.js'); do
+            node --check "$f" || exit 1
+          done
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zaviro-server
+          path: |
+            server/
+            !server/node_modules/
+
+  release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-client, build-server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download client artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zaviro-client-linux
+          path: release
+
+      - name: Download server artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zaviro-server
+          path: server-release
+
+      - name: Package artifacts
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          # Client tarball
+          mkdir -p dist/client
+          cp release/zaviro_client dist/client/
+          tar czf zaviro-client-linux-${VERSION}.tar.gz -C dist client
+          # Server tarball (exclude node_modules, reinstall on target)
+          tar czf zaviro-server-${VERSION}.tar.gz -C server-release server --exclude='node_modules'
+          # Combined README
+          cp README.md dist/ 2>/dev/null || true
+          ls -la *.tar.gz
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Zaviro ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            zaviro-client-linux-*.tar.gz
+            zaviro-server-*.tar.gz
