@@ -5,13 +5,6 @@ client/build-win64/
 *.a
 *.exe
 
-# Node
-server/node_modules/
-npm-debug.log*
-
-# Server keys / identity (contains Ed25519 private key)
-server/data/
-
 # Editor/OS
 .vscode/
 .idea/

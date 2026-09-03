@@ -71,10 +71,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=Release
 
               cmake --build build-win64 -j$(nproc)
-              ls -la build-win64/
-              cp build-win64/zaviro_client.exe /out/ 2>/dev/null || \
-                cp build-win64/zaviro_client.exe /out/zaviro_client.exe 2>/dev/null || \
-                (find build-win64 -name "*.exe" -exec cp {} /out/zaviro_client.exe \;)
+              cp build-win64/zaviro_client.exe /out/
             '
 
       - name: Upload Windows client artifact
@@ -83,44 +80,10 @@ jobs:
           name: zaviro-client-windows
           path: client/build-win64/zaviro_client.exe
 
-  build-server:
-    name: Build Server (Node)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Syntax check
-        working-directory: server
-        run: |
-          for f in $(find src -name '*.js'); do
-            node --check "$f" || exit 1
-          done
-
-      - name: Upload server artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: zaviro-server
-          path: |
-            server/
-            !server/node_modules/
-
   release:
     name: Create GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-client-linux, build-client-windows, build-server]
+    needs: [build-client-linux, build-client-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -132,70 +95,20 @@ jobs:
         with:
           path: artifacts
 
-      - name: Bundle Linux portable package
+      - name: Bundle Linux
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          BUNDLE="dist/zaviro-linux-x64"
-          mkdir -p "$BUNDLE"
+          mkdir -p dist
+          cp artifacts/zaviro-client-linux/zaviro_client dist/zaviro_client_linux
+          chmod +x dist/zaviro_client_linux
+          tar czf "zaviro-linux-x64-${VERSION}.tar.gz" -C dist zaviro_client_linux
 
-          # Client
-          cp artifacts/zaviro-client-linux/zaviro_client "$BUNDLE/"
-          chmod +x "$BUNDLE/zaviro_client"
-
-          # Server
-          cp -r artifacts/zaviro-server "$BUNDLE/server"
-
-          # Tor (if available on system)
-          if [ -x /usr/bin/tor ]; then
-            cp /usr/bin/tor "$BUNDLE/tor"
-            chmod +x "$BUNDLE/tor"
-          fi
-
-          # Start scripts
-          cat > "$BUNDLE/start-server.sh" << 'STARTSRV'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          if [ -x ./tor ]; then ./tor &; sleep 3; fi
-          cd server && npm install && node src/index.js --tor:enabled=true --tor:binPath=../tor
-          STARTSRV
-          chmod +x "$BUNDLE/start-server.sh"
-
-          cat > "$BUNDLE/start-client.sh" << 'STARTCLI'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          ./zaviro_client 127.0.0.1 --port 8765
-          STARTCLI
-          chmod +x "$BUNDLE/start-client.sh"
-
-          tar czf "zaviro-linux-x64-${VERSION}.tar.gz" -C dist "zaviro-linux-x64"
-
-      - name: Bundle Windows portable package
+      - name: Bundle Windows
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
-          BUNDLE="dist/zaviro-windows-x64"
-          mkdir -p "$BUNDLE/tor"
-
-          # Client (may not exist if cross-compile failed)
-          cp artifacts/zaviro-client-windows/zaviro_client.exe "$BUNDLE/" 2>/dev/null || true
-
-          # Server
-          cp -r artifacts/zaviro-server "$BUNDLE/server"
-
-          # Start scripts
-          cat > "$BUNDLE/start-server.bat" << 'BATSRV'
-          @echo off
-          cd /d "%~dp0"
-          if exist tor\tor.exe (start /B tor\tor.exe & timeout /t 3 /nobreak >nul)
-          cd server && npm install && node src/index.js --tor:enabled=true --tor:binPath=../tor/tor.exe
-          BATSRV
-
-          cat > "$BUNDLE/start-client.bat" << 'BATCLI'
-          @echo off
-          cd /d "%~dp0"
-          zaviro_client.exe 127.0.0.1 --port 8765
-          BATCLI
-
-          tar czf "zaviro-windows-x64-${VERSION}.tar.gz" -C dist "zaviro-windows-x64"
+          mkdir -p dist
+          cp artifacts/zaviro-client-windows/zaviro_client.exe dist/
+          tar czf "zaviro-windows-x64-${VERSION}.tar.gz" -C dist zaviro_client.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
