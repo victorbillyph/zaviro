@@ -8,19 +8,8 @@ Player::Player(uint64_t id, const std::string& name)
 }
 
 void Player::update(float dt) {
-    // Apply gravity locally for responsive jumping
-    m_velocity.y += gravity * dt;
-    transform.position.y += m_velocity.y * dt;
-
-    // Ground clamp
-    float groundY = heightAt(transform.position.x, transform.position.z) + height;
-    if (transform.position.y < groundY) {
-        transform.position.y = groundY;
-        m_velocity.y = 0.0f;
-        m_grounded = true;
-    } else {
-        m_grounded = false;
-    }
+    // No physics on client — server is authoritative.
+    // Client only does camera and sends input.
 }
 
 void Player::move(float forward, float right, float jump, float dt) {
@@ -52,13 +41,7 @@ void Player::move(float forward, float right, float jump, float dt) {
     m_velocity.x = wishDir.x * speed;
     m_velocity.z = wishDir.z * speed;
 
-    if (jump > 0.0f && m_grounded) {
-        m_velocity.y = jumpVelocity;
-        m_grounded = false;
-    }
-
-    // Client-side prediction: apply movement locally for instant response.
-    // Server reconciles position via WORLD_UPDATE.
+    // Client-side prediction for horizontal only
     transform.position.x += m_velocity.x * dt;
     transform.position.z += m_velocity.z * dt;
 }

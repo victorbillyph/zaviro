@@ -270,14 +270,10 @@ void Engine::onNetworkMessage(const NetworkMessage& msg) {
                 float sx = j["self"]["position"].value("x", 0.0f);
                 float sy = j["self"]["position"].value("y", 0.0f);
                 float sz = j["self"]["position"].value("z", 0.0f);
-                Vec3 serverPos(sx, sy, sz);
-                // Snap Y immediately (server is authoritative for vertical)
-                // Lerp X/Z smoothly for horizontal movement
-                float lerpFactor = 0.3f;
-                m_player.transform.position.x += (serverPos.x - m_player.transform.position.x) * lerpFactor;
-                m_player.transform.position.z += (serverPos.z - m_player.transform.position.z) * lerpFactor;
-                // Snap Y to prevent bounce on ground
-                m_player.transform.position.y = serverPos.y;
+                // Server authoritative — correct client prediction
+                m_player.transform.position.x += (sx - m_player.transform.position.x) * 0.5f;
+                m_player.transform.position.y = sy;  // snap Y (server controls gravity)
+                m_player.transform.position.z += (sz - m_player.transform.position.z) * 0.5f;
             }
             break;
         }
