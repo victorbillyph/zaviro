@@ -59,29 +59,22 @@ jobs:
             bash -c '
               set -e
               mkdir -p /build/client
-              cp -r /src/client/* /build/client/
+              cp -r /src/client/CMakeLists.txt /build/client/
+              cp -r /src/client/include /build/client/
+              cp -r /src/client/src /build/client/
               cp -r /src/client/third_party /build/client/
-
-              # Download glm + nlohmann_json headers for cross-compile
-              cd /tmp
-              wget -q https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1.zip
-              unzip -q glm-1.0.1.zip
-              mkdir -p /tmp/glm-install
-              cp -r /tmp/glm-1.0.1/glm /tmp/glm-install/
-
-              wget -q https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-              tar xf json.tar.xz
-              cp -r /tmp/json-3.11.3/include/nlohmann /tmp/glm-install/
+              cp -r /src/client/cmake /build/client/
 
               cd /build/client
               cmake -S . -B build-win64 \
-                -DCMAKE_TOOLCHAIN_FILE=/src/client/cmake/mingw-toolchain.cmake \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DGLM_INCLUDE_DIR=/tmp/glm-install \
-                -Dnlohmann_json_DIR=/tmp/json-3.11.3
+                -DCMAKE_TOOLCHAIN_FILE=/build/client/cmake/mingw-toolchain.cmake \
+                -DCMAKE_BUILD_TYPE=Release
 
               cmake --build build-win64 -j$(nproc)
-              cp build-win64/zaviro_client.exe /out/ 2>/dev/null || true
+              ls -la build-win64/
+              cp build-win64/zaviro_client.exe /out/ 2>/dev/null || \
+                cp build-win64/zaviro_client.exe /out/zaviro_client.exe 2>/dev/null || \
+                (find build-win64 -name "*.exe" -exec cp {} /out/zaviro_client.exe \;)
             '
 
       - name: Upload Windows client artifact

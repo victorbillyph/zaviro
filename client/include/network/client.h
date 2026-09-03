@@ -2,16 +2,49 @@
 
 #include <string>
 #include <functional>
-#include <thread>
-#include <mutex>
 #include <queue>
 #include <atomic>
 #include <cstdint>
+
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#else
+#include <thread>
+#include <mutex>
+#endif
 
 struct NetworkMessage {
     uint16_t type;
     std::string data;
 };
+
+#ifdef _WIN32
+class WinMutex {
+    CRITICAL_SECTION cs;
+public:
+    WinMutex() { InitializeCriticalSection(&cs); }
+    ~WinMutex() { DeleteCriticalSection(&cs); }
+    void lock() { EnterCriticalSection(&cs); }
+    void unlock() { LeaveCriticalSection(&cs); }
+
+    class LockGuard {
+        WinMutex& m;
+    public:
+        explicit LockGuard(WinMutex& mutex) : m(mutex) { m.lock(); }
+        ~LockGuard() { m.unlock(); }
+        LockGuard(const LockGuard&) = delete;
+        LockGuard& operator=(const LockGuard&) = delete;
+    };
+};
+#endif
 
 class NetworkClient {
 public:
@@ -41,9 +74,18 @@ public:
 private:
     void receiveLoop();
     bool performSocks5Handshake(int sock, const std::string& host, int port);
+#ifdef _WIN32
+    static DWORD WINAPI receiveThreadProc(LPVOID param);
+#endif
 
+#ifdef _WIN32
+    HANDLE m_receiveThread = nullptr;
+    WinMutex m_mutex;
+#else
     std::thread m_receiveThread;
     std::mutex m_mutex;
+#endif
+
     std::queue<NetworkMessage> m_incoming;
     std::queue<NetworkMessage> m_outgoing;
     std::atomic<bool> m_connected{false};

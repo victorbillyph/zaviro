@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     git \
-    mingw-w64 \
+    g++-mingw-w64-x86-64 \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Cross-compile GLFW for Windows (mingw-w64)
@@ -25,8 +26,22 @@ RUN cd /tmp && \
         -DGLFW_BUILD_TESTS=OFF \
         -DGLFW_BUILD_DOCS=OFF \
         -DGLFW_INSTALL=ON \
-        -DCMAKE_INSTALL_PREFIX=/opt/glfw-win64 \
+        -DCMAKE_INSTALL_PREFIX=/opt/cross-win64 \
         && cmake --build build-win64 -j$(nproc) \
         && cmake --install build-win64
+
+# Install GLM headers (header-only, just copy)
+RUN cd /tmp && \
+    wget -q https://github.com/g-truc/glm/releases/download/1.0.3/glm-1.0.3.zip && \
+    unzip -q glm-1.0.3.zip && \
+    mkdir -p /opt/cross-win64/include && \
+    cp -r /tmp/glm /opt/cross-win64/include/
+
+# Install nlohmann_json headers (header-only, just copy)
+RUN cd /tmp && \
+    wget -q https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz && \
+    tar xf json.tar.xz && \
+    mkdir -p /opt/cross-win64/include && \
+    cp -r /tmp/json/include/nlohmann /opt/cross-win64/include/
 
 WORKDIR /build

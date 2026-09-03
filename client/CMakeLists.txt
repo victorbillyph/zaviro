@@ -14,20 +14,10 @@ endif()
 
 # Dependencies
 if(CROSS_WIN32)
-    # When cross-compiling, use find_package with custom paths
     find_package(glfw3 3.3 REQUIRED)
-    # glm and nlohmann_json are header-only — use FetchContent
-    include(FetchContent)
-    FetchContent_Declare(
-        glm
-        URL https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1.zip
-    )
-    FetchContent_MakeAvailable(glm)
-    FetchContent_Declare(
-        nlohmann_json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
-    )
-    FetchContent_MakeAvailable(nlohmann_json)
+    # glm and nlohmann_json are header-only — installed to /opt/cross-win64/include in Docker
+    set(GLM_INCLUDE_DIR /opt/cross-win64/include)
+    set(NLOHMANN_JSON_INCLUDE_DIR /opt/cross-win64/include)
 else()
     find_package(OpenGL REQUIRED)
     find_package(glfw3 3.3 REQUIRED)
@@ -62,11 +52,18 @@ target_include_directories(zaviro_client PRIVATE
 
 # Platform-specific linking
 if(CROSS_WIN32)
+    target_include_directories(zaviro_client PRIVATE
+        ${GLM_INCLUDE_DIR}
+        ${NLOHMANN_JSON_INCLUDE_DIR}
+    )
+    target_compile_definitions(zaviro_client PRIVATE
+        _WIN32_WINNT=0x0600
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
     target_link_libraries(zaviro_client PRIVATE
         glfw
         glad
-        glm::glm
-        nlohmann_json::nlohmann_json
         opengl32
         ws2_32
     )
