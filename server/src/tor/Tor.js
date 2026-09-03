@@ -60,7 +60,8 @@ function socksConnect({ proxyHost = '127.0.0.1', proxyPort = 9050, host, port })
  * @param {string} [opts.dataDir] where tor keeps state + hs keys (persistent!)
  * @returns {Promise<{hostname: string, dataDir: string, socksPort: number}>}
  */
-async function startTor({ servicePort, socksPort = 19050, dataDir }) {
+async function startTor({ servicePort, socksPort = 19050, dataDir, torPath }) {
+    const torBin = torPath || 'tor';
     const dir = dataDir || tmpdir('svc');
     fs.mkdirSync(path.join(dir, 'services'), { recursive: true });
     fs.chmodSync(dir, 0o700);
@@ -86,14 +87,18 @@ async function startTor({ servicePort, socksPort = 19050, dataDir }) {
 
     fs.writeFileSync(torrc, torrcContent);
 
-    // Check tor binary
-    if (spawnSync('tor', ['--version'], { encoding: 'utf8' }).error) {
+    // Check tor binary — try bundled path, then PATH
+    let resolvedTor = torBin;
+    if (!fs.existsSync(resolvedTor)) {
+        resolvedTor = 'tor';
+    }
+    if (spawnSync(resolvedTor, ['--version'], { encoding: 'utf8' }).error) {
         throw new Error(
             'Tor binary not found. Install it (Arch: sudo pacman -S tor; Debian: sudo apt install tor).'
         );
     }
 
-    const proc = spawn('tor', ['-f', torrc], {
+    const proc = spawn(resolvedTor, ['-f', torrc], {
         stdio: ['ignore', 'ignore', 'pipe']
     });
 

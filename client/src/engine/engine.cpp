@@ -3,8 +3,12 @@
 #include "engine/window.h"
 #include "network/protocol.h"
 #include <nlohmann/json.hpp>
+#include "stb_image.h"
+#include <GLFW/glfw3.h>
 #include <cmath>
+#include <cstring>
 #include <iostream>
+#include <vector>
 
 using nlohmann::json;
 
@@ -15,6 +19,29 @@ using nlohmann::json;
 #define KEY_SPACE 32
 #define KEY_ESCAPE 256
 #define MOUSE_LEFT 0
+
+// Copy GLFW key codes used by the editor text fields (ASCII letters/digits)
+#define KEY_0 48
+#define KEY_1 49
+
+static std::vector<unsigned char> base64Decode(const std::string& in) {
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<unsigned char> out;
+    int val = 0, vbits = -8;
+    for (unsigned char c : in) {
+        if (c == '=') break;
+        size_t idx = chars.find((char)c);
+        if (idx == std::string::npos) continue;
+        val = (val << 6) | (int)idx;
+        vbits += 6;
+        if (vbits >= 0) {
+            out.push_back((unsigned char)((val >> vbits) & 0xFF));
+            vbits -= 8;
+        }
+    }
+    return out;
+}
 
 Engine& Engine::instance() {
     static Engine inst;
@@ -247,7 +274,87 @@ void Engine::onNetworkMessage(const NetworkMessage& msg) {
         case Proto::ENTITY_REMOVE:
             m_world.removeEntity(j.value("entityId", 0));
             break;
+
+        case Proto::UNIVERSE_CREATED:
+        case Proto::UNIVERSE_UPDATED:
+        case Proto::UNIVERSE_DELETED: {
+            if (j.value("success", false)) {
+                std::cout << "Universe update acknowledged" << std::endl;
+            }
+            break;
+        }
+
+        case Proto::UI_DEFINITION: {
+            m_uiElements.clear();
+            m_customUIEnabled = false;
+            if (j.contains("ui") && j["ui"].is_array()) {
+                for (const auto& el : j["ui"]) {
+                    CustomUIElement e;
+                    e.type = el.value("type", "panel");
+                    e.id = el.value("id", "");
+                    e.x = el.value("x", 0.0f);
+                    e.y = el.value("y", 0.0f);
+                    e.w = el.value("w", 100.0f);
+                    e.h = el.value("h", 40.0f);
+                    e.text = el.value("text", "");
+                    e.fontSize = el.value("fontSize", 0.8f);
+                    e.texture = el.value("texture", "");
+                    if (el.contains("color")) {
+                        e.r = el["color"].value("r", 0.3f);
+                        e.g = el["color"].value("g", 0.3f);
+                        e.b = el["color"].value("b", 0.3f);
+                        e.a = el["color"].value("a", 0.9f);
+                    }
+                    m_uiElements.push_back(e);
+                }
+                m_customUIEnabled = true;
+            }
+            m_hasServerScript = j.value("hasServerScript", false);
+            m_window->setCursorDisabled(false); // show cursor for UI interaction
+            std::cout << "Custom UI loaded: " << m_uiElements.size() << " elements" << std::endl;
+            break;
+        }
+
+        case Proto::TEXTURE_DATA: {
+            std::string name = j.value("name", "");
+            std::string mime = j.value("mime", "image/png");
+            std::string b64 = j.value("data", "");
+            if (!name.empty() && !b64.empty()) {
+                decodeTexture(name, mime, b64);
+            }
+            break;
+        }
     }
+}
+
+void Engine::decodeTexture(const std::string& name, const std::string& mime, const std::string& base64Data) {
+    auto bytes = base64Decode(base64Data);
+    if (bytes.empty()) {
+        std::cout << "Texture " << name << ": empty data" << std::endl;
+        return;
+    }
+    int width = 0, height = 0, channels = 0;
+    unsigned char* img = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &width, &height, &channels, 4);
+    if (!img) {
+        std::cout << "Texture " << name << ": failed to decode" << std::endl;
+        return;
+    }
+    unsigned int tex = m_renderer->createTextureFromData(img, width, height, 4);
+    stbi_image_free(img);
+    // Release any existing texture with the same name
+    auto it = m_runtimeTextures.find(name);
+    if (it != m_runtimeTextures.end() && it->second) {
+        m_renderer->deleteTexture(it->second);
+    }
+    m_runtimeTextures[name] = tex;
+    std::cout << "Texture loaded: " << name << " (" << width << "x" << height << ")" << std::endl;
+}
+
+void Engine::clearRuntimeTextures() {
+    for (auto& [name, tex] : m_runtimeTextures) {
+        if (tex) m_renderer->deleteTexture(tex);
+    }
+    m_runtimeTextures.clear();
 }
 
 void Engine::run() {
@@ -279,9 +386,21 @@ void Engine::runLobby() {
     m_mouseX = (float)mx;
     m_mouseY = (float)my;
 
-    // Handle click on universe card
-    if (m_window->isMouseJustPressed(MOUSE_LEFT)) {
-        handleLobbyClick(m_mouseX, m_mouseY);
+    if (m_showEditor) {
+        // Text input for the editor form
+        std::string typed = m_window->consumeTypedText();
+        if (!typed.empty()) handleEditorType(typed);
+        if (m_window->isKeyJustPressed(GLFW_KEY_ENTER) && m_editState == 2 && !m_editScript.empty()) {
+            // Save button is the primary action; Enter just commits focused field
+        }
+        if (m_window->isMouseJustPressed(MOUSE_LEFT)) {
+            handleEditorClick(m_mouseX, m_mouseY);
+        }
+    } else {
+        // Handle click on universe card
+        if (m_window->isMouseJustPressed(MOUSE_LEFT)) {
+            handleLobbyClick(m_mouseX, m_mouseY);
+        }
     }
 
     renderLobby();
@@ -290,6 +409,21 @@ void Engine::runLobby() {
 void Engine::handleLobbyClick(float mx, float my) {
     float w = (float)m_renderer->getUiWidth();
     float h = (float)m_renderer->getUiHeight();
+
+    // "New Universe" button (top-right)
+    float nbW = 200.0f, nbH = 44.0f;
+    float nbX = w - nbW - 16.0f, nbY = 16.0f;
+    if (m_online && mx >= nbX && mx <= nbX + nbW && my >= nbY && my <= nbY + nbH) {
+        m_showEditor = true;
+        m_editIsNew = true;
+        m_editName = "";
+        m_editDesc = "";
+        m_editScript = "";
+        m_editState = 0;
+        m_window->setCursorDisabled(false);
+        std::cout << "Opening universe editor (new)" << std::endl;
+        return;
+    }
 
     // Card layout: centered column
     float cardW = 600.0f;
@@ -336,6 +470,15 @@ void Engine::renderLobby() {
     // Subtitle
     std::string subtitle = "Escolha um Universo para entrar";
     m_renderer->drawText(subtitle, w/2.0f - 140.0f, 75.0f, 1.0f, Color(0.8f, 0.8f, 0.9f, 1.0f));
+
+    // New Universe button (top-right)
+    if (m_online) {
+        float nbW = 200.0f, nbH = 44.0f;
+        float nbX = w - nbW - 16.0f, nbY = 16.0f;
+        bool nHov = (m_mouseX >= nbX && m_mouseX <= nbX + nbW && m_mouseY >= nbY && m_mouseY <= nbY + nbH);
+        m_renderer->drawRect(nbX, nbY, nbW, nbH, Color(nHov ? 0.15f : 0.08f, 0.55f, 0.3f, 0.95f));
+        m_renderer->drawText("+ Novo Universo", nbX + 18.0f, nbY + 12.0f, 1.1f, Color(1,1,1,1));
+    }
 
     // Universe cards
     float cardW = 600.0f;
@@ -398,6 +541,10 @@ void Engine::renderLobby() {
         m_renderer->drawText("Carregando...", w/2.0f - 55.0f, h/2.0f - 5.0f, 1.2f, Color(1,1,1,1));
     }
 
+    if (m_showEditor) {
+        renderEditor();
+    }
+
     m_renderer->uiEnd();
     m_renderer->endFrame();
     m_window->swapBuffers();
@@ -406,9 +553,8 @@ void Engine::renderLobby() {
 // ============ GAME ============
 
 void Engine::runGame() {
-    double lastMouseX = 0, lastMouseY = 0;
     if (m_firstMouse) {
-        m_window->getMousePosition(lastMouseX, lastMouseY);
+        m_window->getMousePosition(m_lastMouseX, m_lastMouseY);
         m_firstMouse = false;
     }
 
@@ -418,10 +564,10 @@ void Engine::runGame() {
     // Mouse look
     double mouseX, mouseY;
     m_window->getMousePosition(mouseX, mouseY);
-    float dx = (float)(mouseX - lastMouseX);
-    float dy = (float)(mouseY - lastMouseY);
-    lastMouseX = mouseX;
-    lastMouseY = mouseY;
+    float dx = (float)(mouseX - m_lastMouseX);
+    float dy = (float)(mouseY - m_lastMouseY);
+    m_lastMouseX = mouseX;
+    m_lastMouseY = mouseY;
 
     // If cursor is visible, use lobby mouse position for UI
     m_mouseX = (float)mouseX;
@@ -450,12 +596,28 @@ void Engine::runGame() {
         m_network.send(Proto::INPUT, input.dump());
     }
 
-    // ESC to go back to lobby
-    if (m_window->isKeyPressed(KEY_ESCAPE)) {
+    // Custom UI interaction (show cursor, click elements)
+    if (m_customUIEnabled) {
+        // If cursor is still disabled from FPS mode, show it for UI interaction
         if (m_window->isCursorDisabled()) {
             m_window->setCursorDisabled(false);
-            m_gameState = GameState::LOBBY;
+        }
+        m_mouseX = (float)mouseX;
+        m_mouseY = (float)mouseY;
+        if (m_window->isMouseJustPressed(MOUSE_LEFT)) {
+            handleCustomUIClick(m_mouseX, m_mouseY);
+        }
+    }
+
+    // ESC to go back to lobby
+    if (m_window->isKeyPressed(KEY_ESCAPE)) {
+        if (m_window->isCursorDisabled() || m_customUIEnabled) {
+            m_window->setCursorDisabled(false);
             m_firstMouse = true;
+            clearRuntimeTextures();
+            m_uiElements.clear();
+            m_customUIEnabled = false;
+            m_gameState = GameState::LOBBY;
             m_network.send(Proto::LEAVE_UNIVERSE, "{}");
             m_remotePlayers.clear();
             return;
@@ -521,13 +683,177 @@ void Engine::renderGame() {
     // ESC hint
     m_renderer->drawText("ESC - Voltar ao Lobby | WASD - Mover | SPACE - Pular", 10.0f, m_renderer->getUiHeight() - 22.0f, 0.9f, Color(1,1,1,0.6f));
 
+    if (m_customUIEnabled) {
+        renderCustomUI();
+    }
+
     m_renderer->uiEnd();
     m_renderer->endFrame();
     m_window->swapBuffers();
 }
 
+void Engine::renderCustomUI() {
+    float w = (float)m_renderer->getUiWidth();
+    float h = (float)m_renderer->getUiHeight();
+    for (const auto& e : m_uiElements) {
+        float x = e.x > 0 && e.x <= 1 ? e.x * w : e.x;
+        float y = e.y > 0 && e.y <= 1 ? e.y * h : e.y;
+        float ew = e.w > 0 && e.w <= 1 ? e.w * w : e.w;
+        float eh = e.h > 0 && e.h <= 1 ? e.h * h : e.h;
+        if (e.type == "button") {
+            m_renderer->drawRect(x, y, ew, eh, Color(e.r, e.g, e.b, e.a));
+            m_renderer->drawText(e.text, x + 8.0f, y + eh*0.25f, e.fontSize, Color(1,1,1,1));
+        } else if (e.type == "panel") {
+            m_renderer->drawRect(x, y, ew, eh, Color(e.r, e.g, e.b, e.a));
+        } else if (e.type == "text") {
+            m_renderer->drawText(e.text, x, y, e.fontSize, Color(e.r, e.g, e.b, e.a));
+        } else if (e.type == "image") {
+            auto it = m_runtimeTextures.find(e.texture);
+            if (it != m_runtimeTextures.end() && it->second) {
+                m_renderer->drawTexturedRect(x, y, ew, eh, it->second, Color(1,1,1,1));
+            }
+        }
+    }
+}
+
+void Engine::handleCustomUIClick(float x, float y) {
+    float w = (float)m_renderer->getUiWidth();
+    float h = (float)m_renderer->getUiHeight();
+    bool hit = false;
+    for (const auto& e : m_uiElements) {
+        if (e.type != "button") continue;
+        float ex = e.x > 0 && e.x <= 1 ? e.x * w : e.x;
+        float ey = e.y > 0 && e.y <= 1 ? e.y * h : e.y;
+        float ew = e.w > 0 && e.w <= 1 ? e.w * w : e.w;
+        float eh = e.h > 0 && e.h <= 1 ? e.h * h : e.h;
+        if (x >= ex && x <= ex + ew && y >= ey && y <= ey + eh) {
+            json ev = {{"elementId", e.id}, {"value", true}};
+            m_network.send(Proto::UI_EVENT, ev.dump());
+            std::cout << "UI click: " << e.id << std::endl;
+            hit = true;
+            break;
+        }
+    }
+    (void)hit;
+}
+
+// ============ UNIVERSE EDITOR ============
+
+void Engine::renderEditor() {
+    float w = (float)m_renderer->getUiWidth();
+    float h = (float)m_renderer->getUiHeight();
+
+    // Darken background
+    m_renderer->drawRect(0, 0, w, h, Color(0, 0, 0, 0.55f));
+
+    // Panel
+    float pw = 620.0f, ph = 430.0f;
+    float px = (w - pw) / 2.0f, py = (h - ph) / 2.0f;
+    m_renderer->drawRect(px, py, pw, ph, Color(0.1f, 0.1f, 0.16f, 0.98f));
+
+    m_renderer->drawText(m_editIsNew ? "Criar Universo" : "Editar Universo", px + 20.0f, py + 14.0f, 1.5f, Color(1, 0.92f, 0.3f, 1));
+
+    // Name field
+    float ly = py + 70.0f;
+    m_renderer->drawText("Nome", px + 20.0f, ly, 1.0f, Color(0.8f, 0.8f, 0.9f, 1));
+    m_renderer->drawRect(px + 20.0f, ly + 24.0f, pw - 40.0f, 40.0f,
+        m_editState == 0 ? Color(0.25f, 0.25f, 0.4f, 1) : Color(0.16f, 0.16f, 0.25f, 1));
+    m_renderer->drawText(m_editName.empty() ? "(digite o nome)" : m_editName, px + 28.0f, ly + 34.0f, 1.0f,
+        m_editName.empty() ? Color(0.5f, 0.5f, 0.6f, 1) : Color(1, 1, 1, 1));
+
+    // Description field
+    ly += 90.0f;
+    m_renderer->drawText("Descricao", px + 20.0f, ly, 1.0f, Color(0.8f, 0.8f, 0.9f, 1));
+    m_renderer->drawRect(px + 20.0f, ly + 24.0f, pw - 40.0f, 40.0f,
+        m_editState == 1 ? Color(0.25f, 0.25f, 0.4f, 1) : Color(0.16f, 0.16f, 0.25f, 1));
+    m_renderer->drawText(m_editDesc.empty() ? "(digite a descricao)" : m_editDesc, px + 28.0f, ly + 34.0f, 1.0f,
+        m_editDesc.empty() ? Color(0.5f, 0.5f, 0.6f, 1) : Color(1, 1, 1, 1));
+
+    // Script field
+    ly += 90.0f;
+    m_renderer->drawText("Script do servidor (JavaScript)", px + 20.0f, ly, 1.0f, Color(0.8f, 0.8f, 0.9f, 1));
+    m_renderer->drawRect(px + 20.0f, ly + 24.0f, pw - 40.0f, 86.0f,
+        m_editState == 2 ? Color(0.25f, 0.25f, 0.4f, 1) : Color(0.16f, 0.16f, 0.25f, 1));
+    // Preview first 3 lines of script
+    std::string scriptPreview = m_editScript.empty()
+        ? "(eventos: onInit, onJoin, onTick, onChat, onPlaceBlock, onUIEvent)"
+        : m_editScript;
+    m_renderer->drawText(scriptPreview.substr(0, 90), px + 26.0f, ly + 32.0f, 0.7f,
+        m_editScript.empty() ? Color(0.5f, 0.5f, 0.6f, 1) : Color(1, 1, 1, 1));
+
+    // Buttons
+    float by = py + ph - 70.0f;
+    m_renderer->drawRect(px + 20.0f, by, 180.0f, 46.0f, Color(0.15f, 0.6f, 0.3f, 1));
+    m_renderer->drawText("Salvar", px + 65.0f, by + 13.0f, 1.2f, Color(1, 1, 1, 1));
+    m_renderer->drawRect(px + pw - 200.0f, by, 180.0f, 46.0f, Color(0.5f, 0.16f, 0.16f, 1));
+    m_renderer->drawText("Cancelar", px + pw - 155.0f, by + 13.0f, 1.2f, Color(1, 1, 1, 1));
+}
+
+void Engine::handleEditorClick(float mx, float my) {
+    float w = (float)m_renderer->getUiWidth();
+    float h = (float)m_renderer->getUiHeight();
+    float pw = 620.0f, ph = 430.0f;
+    float px = (w - pw) / 2.0f, py = (h - ph) / 2.0f;
+
+    // Focus fields (click inside field box selects it)
+    float ly = py + 70.0f;
+    if (mx >= px + 20.0f && mx <= px + pw - 20.0f && my >= ly + 24.0f && my <= ly + 64.0f) { m_editState = 0; return; }
+    float ly2 = ly + 90.0f;
+    if (mx >= px + 20.0f && mx <= px + pw - 20.0f && my >= ly2 + 24.0f && my <= ly2 + 64.0f) { m_editState = 1; return; }
+    float ly3 = ly2 + 90.0f;
+    if (mx >= px + 20.0f && mx <= px + pw - 20.0f && my >= ly3 + 24.0f && my <= ly3 + 110.0f) { m_editState = 2; return; }
+
+    // Save
+    float by = py + ph - 70.0f;
+    if (mx >= px + 20.0f && mx <= px + 200.0f && my >= by && my <= by + 46.0f) {
+        if (m_editName.empty()) { std::cout << "Nome vazio" << std::endl; return; }
+        json payload = {
+            {"name", m_editName},
+            {"description", m_editDesc},
+            {"scriptServer", m_editScript}
+        };
+        if (m_editIsNew) {
+            m_network.send(Proto::CREATE_UNIVERSE, payload.dump());
+        } else {
+            payload["universeId"] = 0; // placeholder; editing existing universe id TBD
+            m_network.send(Proto::UPDATE_UNIVERSE, payload.dump());
+        }
+        std::cout << "Saving universe: " << m_editName << std::endl;
+        m_showEditor = false;
+        return;
+    }
+
+    // Cancel
+    if (mx >= px + pw - 200.0f && mx <= px + pw - 20.0f && my >= by && my <= by + 46.0f) {
+        m_showEditor = false;
+        return;
+    }
+}
+
+void Engine::handleEditorType(const std::string& typed) {
+    std::string* target = nullptr;
+    if (m_editState == 0) target = &m_editName;
+    else if (m_editState == 1) target = &m_editDesc;
+    else if (m_editState == 2) target = &m_editScript;
+    if (!target) return;
+
+    for (unsigned char c : typed) {
+        if (c == '\n' || c == '\r') continue;
+        if (c == 0) continue;
+        // Skip control chars
+        if (c < 32) continue;
+        // Backspace is handled via key (not char). Add char:
+        target->push_back((char)c);
+    }
+    // Backspace handling
+    if (m_window->isKeyJustPressed(GLFW_KEY_BACKSPACE) && !target->empty()) {
+        target->pop_back();
+    }
+}
+
 void Engine::shutdown() {
     m_network.disconnect();
+
     if (m_renderer) m_renderer->shutdown();
     m_window.reset();
     m_renderer.reset();

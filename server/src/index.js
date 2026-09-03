@@ -21,6 +21,7 @@ const server = new TcpServer();
         await node.init({
             tor: torEnabled,
             socksPort: nconf.get('tor:socksPort') || 19050,
+            torPath: nconf.get('tor:binPath') || null,
             directory: directoryOnion ? {
                 onion: directoryOnion,
                 socksPort: nconf.get('federation:directory:socksPort') || 19050

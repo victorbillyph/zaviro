@@ -12,6 +12,11 @@ namespace Proto {
     constexpr uint16_t BREAK_BLOCK = 5;
     constexpr uint16_t JOIN_UNIVERSE = 6;
     constexpr uint16_t LEAVE_UNIVERSE = 7;
+    constexpr uint16_t CREATE_UNIVERSE = 8;
+    constexpr uint16_t UPDATE_UNIVERSE = 9;
+    constexpr uint16_t DELETE_UNIVERSE = 10;
+    constexpr uint16_t UPLOAD_TEXTURE = 11;
+    constexpr uint16_t UI_EVENT = 12;
 
     // Server -> Client
     constexpr uint16_t WELCOME = 100;
@@ -26,4 +31,11 @@ namespace Proto {
     constexpr uint16_t UNIVERSE_JOINED = 109;
     constexpr uint16_t SERVER_LIST = 110;
     constexpr uint16_t SERVER_INFO = 111;
+    constexpr uint16_t UNIVERSE_CREATED = 112;
+    constexpr uint16_t UNIVERSE_UPDATED = 113;
+    constexpr uint16_t UNIVERSE_DELETED = 114;
+    constexpr uint16_t TEXTURE_ACK = 115;
+    constexpr uint16_t UI_DEFINITION = 116;
+    constexpr uint16_t TEXTURE_DATA = 117;
+    constexpr uint16_t CUSTOM_EVENT = 118;
 }

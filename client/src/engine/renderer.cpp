@@ -669,6 +669,49 @@ void Renderer::drawRect(float x, float y, float w, float h, const Color& color) 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
+unsigned int Renderer::createTextureFromData(const unsigned char* data, int width, int height, int channels) {
+    unsigned int tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    int internal = (channels == 1) ? GL_R8 : (channels == 2) ? GL_RG8 : (channels == 3) ? GL_RGB8 : GL_RGBA8;
+    int format = (channels == 1) ? GL_RED : (channels == 2) ? GL_RG : (channels == 3) ? GL_RGB : GL_RGBA;
+    glTexImage2D(GL_TEXTURE_2D, 0, internal, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return tex;
+}
+
+void Renderer::deleteTexture(unsigned int texture) {
+    if (texture) glDeleteTextures(1, &texture);
+}
+
+void Renderer::drawTexturedRect(float x, float y, float w, float h, unsigned int texture, const Color& tint) {
+    int colorLoc = glGetUniformLocation(m_uiShader, "uColor");
+    glUniform4f(colorLoc, tint.r, tint.g, tint.b, tint.a);
+    int texLoc = glGetUniformLocation(m_uiShader, "uTex");
+    glUniform1i(texLoc, 0);
+    int useTexLoc = glGetUniformLocation(m_uiShader, "uUseTexture");
+    glUniform1i(useTexLoc, 1);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    float model[9] = {
+        w, 0.0f, 0.0f,
+        0.0f, h, 0.0f,
+        x, y, 1.0f,
+    };
+
+    int modelLoc = glGetUniformLocation(m_uiShader, "model");
+    glUniformMatrix3fv(modelLoc, 1, GL_FALSE, model);
+
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void Renderer::drawText(const std::string& text, float x, float y, float scale, const Color& color) {
     int colorLoc = glGetUniformLocation(m_uiShader, "uColor");
     glUniform4f(colorLoc, color.r, color.g, color.b, color.a);

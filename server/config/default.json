@@ -11,6 +11,7 @@
   "tor": {
     "enabled": true,
     "socksPort": 19050,
+    "binPath": null,
     "dataDir": "/tmp/zaviro-server-tor"
   },
   "federation": {

@@ -38,6 +38,17 @@ struct RemoteServer {
     std::string pubKey;
 };
 
+// A UI element declared by a universe's scriptClient (custom in-game UI).
+struct CustomUIElement {
+    std::string type;        // "button" | "panel" | "text" | "image"
+    std::string id;
+    float x = 0, y = 0, w = 0, h = 0;
+    std::string text;
+    float r = 0.3f, g = 0.3f, b = 0.3f, a = 0.9f;
+    float fontSize = 0.8f;
+    std::string texture;     // texture name for "image"
+};
+
 enum class GameState {
     LOBBY,
     LOADING,
@@ -78,6 +89,18 @@ private:
     void runGame();
     void renderGame();
 
+    // Custom in-game UI (from universe scriptClient)
+    void renderCustomUI();
+    void handleCustomUIClick(float mouseX, float mouseY);
+
+    // Universe editor (lobby)
+    void renderEditor();
+    void handleEditorClick(float mouseX, float mouseY);
+    void handleEditorType(const std::string& typed);
+
+    void decodeTexture(const std::string& name, const std::string& mime, const std::string& base64Data);
+    void clearRuntimeTextures();
+
     std::unique_ptr<Window> m_window;
     std::unique_ptr<Renderer> m_renderer;
     World m_world;
@@ -92,6 +115,7 @@ private:
     float m_mouseX = 0, m_mouseY = 0;
     bool m_firstMouse = true;
     bool m_wantJoin = false;
+    double m_lastMouseX = 0, m_lastMouseY = 0;
 
     std::vector<UniverseInfo> m_universes;
     std::vector<RemoteServer> m_serverList;
@@ -103,6 +127,20 @@ private:
     std::string m_proxyHost;
     int m_proxyPort = 9050;
     bool m_useProxy = false;
+
+    // Custom UI state (from universe scriptClient)
+    std::vector<CustomUIElement> m_uiElements;
+    bool m_customUIEnabled = false;
+    bool m_hasServerScript = false;
+    std::unordered_map<std::string, unsigned int> m_runtimeTextures;
+
+    // Universe editor state
+    bool m_showEditor = false;
+    std::string m_editName;
+    std::string m_editDesc;
+    std::string m_editScript;
+    int m_editState = 0;   // 0 = name field active, 1 = desc, 2 = script
+    bool m_editIsNew = false;
 
     bool m_running = false;
 };

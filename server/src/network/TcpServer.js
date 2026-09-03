@@ -2,6 +2,7 @@ const net = require('net');
 const nconf = require('nconf');
 const Player = require('../game/Player');
 const Universe = require('../game/Universe');
+const UniverseStore = require('../game/UniverseStore');
 
 nconf.argv().env().file({ file: __dirname + '/../config/default.json' });
 
@@ -15,6 +16,11 @@ const MSG = {
     BREAK_BLOCK: 5,
     JOIN_UNIVERSE: 6,
     LEAVE_UNIVERSE: 7,
+    CREATE_UNIVERSE: 8,
+    UPDATE_UNIVERSE: 9,
+    DELETE_UNIVERSE: 10,
+    UPLOAD_TEXTURE: 11,
+    UI_EVENT: 12,
 
     // S -> C
     WELCOME: 100,
@@ -29,6 +35,13 @@ const MSG = {
     UNIVERSE_JOINED: 109,
     SERVER_LIST: 110,
     SERVER_INFO: 111,
+    UNIVERSE_CREATED: 112,
+    UNIVERSE_UPDATED: 113,
+    UNIVERSE_DELETED: 114,
+    TEXTURE_ACK: 115,
+    UI_DEFINITION: 116,
+    TEXTURE_DATA: 117,
+    CUSTOM_EVENT: 118,
 };
 
 class TcpGameServer {
@@ -43,9 +56,13 @@ class TcpGameServer {
         this.universes = new Map();
         this.nextUniverseId = 1;
 
+        // Player-created universes (persisted)
+        this.store = new UniverseStore();
+
         this.running = false;
 
         this.createDefaultUniverses();
+        this.loadPlayerUniverses();
     }
 
     createDefaultUniverses() {
@@ -82,8 +99,22 @@ class TcpGameServer {
 
         for (const cfg of defaults) {
             const id = this.nextUniverseId++;
-            this.universes.set(id, new Universe(id, cfg));
+            const u = new Universe(id, cfg);
+            u.setServer(this);
+            this.universes.set(id, u);
         }
+    }
+
+    loadPlayerUniverses() {
+        for (const doc of this.store.getAll()) {
+            // avoid id collisions with defaults
+            if (doc.id >= this.nextUniverseId) this.nextUniverseId = doc.id + 1;
+            const u = new Universe(doc.id, doc);
+            u.setServer(this);
+            this.universes.set(doc.id, u);
+        }
+        // continue the store's id counter past defaults + loaded player universes
+        this.store.nextId = this.nextUniverseId;
     }
 
     start() {
@@ -200,6 +231,11 @@ class TcpGameServer {
                             message: data.message || ''
                         }
                     }, clientId);
+                    client.currentUniverse.fire('onChat', {
+                        id: clientId,
+                        name: client.player.name,
+                        message: data.message || ''
+                    });
                 }
                 break;
 
@@ -216,6 +252,11 @@ class TcpGameServer {
                         type: MSG.ENTITY_CREATE,
                         data: entity
                     });
+                    client.currentUniverse.fire('onPlaceBlock', {
+                        id: clientId,
+                        name: client.player.name,
+                        entity: entity
+                    });
                 }
                 break;
 
@@ -225,6 +266,11 @@ class TcpGameServer {
                         client.currentUniverse.broadcastToAll(this, {
                             type: MSG.ENTITY_REMOVE,
                             data: { entityId: data.entityId }
+                        });
+                        client.currentUniverse.fire('onBreakBlock', {
+                            id: clientId,
+                            name: client.player.name,
+                            entityId: data.entityId
                         });
                     }
                 }
@@ -266,6 +312,20 @@ class TcpGameServer {
                     }
                 });
 
+                // Send UI definition + textures for scripted universes
+                if (universe.scriptClient && universe.scriptClient.ui) {
+                    this.send(client, MSG.UI_DEFINITION, {
+                        universeId: universe.id,
+                        ui: universe.scriptClient.ui,
+                        hasServerScript: !!universe.scriptServer
+                    });
+                }
+                if (universe.textures && Object.keys(universe.textures).length > 0) {
+                    for (const [name, tex] of Object.entries(universe.textures)) {
+                        this.send(client, MSG.TEXTURE_DATA, { name, mime: tex.mime, data: tex.data });
+                    }
+                }
+
                 // Notify others in universe
                 universe.broadcastToAll(this, {
                     type: MSG.PLAYER_JOIN,
@@ -289,6 +349,117 @@ class TcpGameServer {
                     this.sendUniverseList(client);
                     this.broadcastUniverseList();
                 }
+                break;
+            }
+
+            case MSG.CREATE_UNIVERSE: {
+                const doc = this.store.create({
+                    name: data.name || 'Novo Universo',
+                    description: data.description || '',
+                    maxPlayers: data.maxPlayers || 16,
+                    seed: data.seed || Math.floor(Math.random() * 100000),
+                    bgColor: data.bgColor || { r: 0.15, g: 0.15, b: 0.2 },
+                    ownerId: clientId,
+                    ownerName: client.player.name,
+                    scriptServer: data.scriptServer || '',
+                    scriptClient: (data.scriptClient && data.scriptClient.ui)
+                        ? data.scriptClient
+                        : { ui: [] },
+                    textures: data.textures || {}
+                });
+                const u = new Universe(doc.id, doc);
+                u.setServer(this);
+                this.universes.set(u.id, u);
+                this.send(client, MSG.UNIVERSE_CREATED, { success: true, universe: u.getInfo() });
+                this.broadcastUniverseList();
+                console.log(`${client.player.name} criou universo "${u.name}" (#${u.id})`);
+                break;
+            }
+
+            case MSG.UPDATE_UNIVERSE: {
+                const universe = this.universes.get(data.universeId);
+                if (!universe) { this.send(client, MSG.UNIVERSE_UPDATED, { success: false, error: 'not found' }); break; }
+                if (universe.ownerId !== clientId) { this.send(client, MSG.UNIVERSE_UPDATED, { success: false, error: 'not owner' }); break; }
+                const patch = {};
+                if (data.name !== undefined) patch.name = data.name;
+                if (data.description !== undefined) patch.description = data.description;
+                if (data.maxPlayers !== undefined) patch.maxPlayers = data.maxPlayers;
+                if (data.seed !== undefined) patch.seed = data.seed;
+                if (data.bgColor !== undefined) patch.bgColor = data.bgColor;
+                if (data.scriptServer !== undefined) patch.scriptServer = data.scriptServer;
+                if (data.scriptClient !== undefined) patch.scriptClient = data.scriptClient;
+                if (data.textures !== undefined) patch.textures = data.textures;
+                this.store.update(universe.id, patch);
+                // rebuild universe in place
+                const fresh = new Universe(universe.id, this.store.get(universe.id));
+                fresh.setServer(this);
+                // preserve currently-connected players
+                for (const [pid, player] of universe.world.players) {
+                    fresh.world.players.set(pid, player);
+                }
+                this.universes.set(universe.id, fresh);
+                this.send(client, MSG.UNIVERSE_UPDATED, { success: true, universe: fresh.getInfo() });
+                this.broadcastUniverseList();
+                console.log(`${client.player.name} atualizou universo #${universe.id}`);
+                break;
+            }
+
+            case MSG.DELETE_UNIVERSE: {
+                const universe = this.universes.get(data.universeId);
+                if (!universe) { this.send(client, MSG.UNIVERSE_DELETED, { success: false, error: 'not found' }); break; }
+                if (universe.ownerId !== clientId) { this.send(client, MSG.UNIVERSE_DELETED, { success: false, error: 'not owner' }); break; }
+                this.store.remove(universe.id);
+                this.universes.delete(universe.id);
+                // kick players out
+                for (const [cid] of universe.world.players) {
+                    const c = this.clients.get(cid);
+                    if (c && c.currentUniverse === universe) {
+                        this.leaveUniverse(c);
+                        this.sendUniverseList(c);
+                    }
+                }
+                this.send(client, MSG.UNIVERSE_DELETED, { success: true, universeId: data.universeId });
+                this.broadcastUniverseList();
+                console.log(`${client.player.name} excluiu universo #${data.universeId}`);
+                break;
+            }
+
+            case MSG.UPLOAD_TEXTURE: {
+                if (!client.currentUniverse) break;
+                const univ = client.currentUniverse;
+                const name = (data.name || 'tex' + Date.now()).toString();
+                const tex = {
+                    mime: data.mime || 'image/png',
+                    data: data.data || ''
+                };
+                univ.textures[name] = tex;
+                if (univ.ownerId === clientId) {
+                    const stored = this.store.get(univ.id);
+                    if (stored) {
+                        stored.textures = stored.textures || {};
+                        stored.textures[name] = tex;
+                        this.store.update(univ.id, { textures: stored.textures });
+                    }
+                } else {
+                    // non-owner uploads runtime texture; keep in memory only
+                    console.log(`${client.player.name} enviou textura ${name} (runtime)`);
+                }
+                this.send(client, MSG.TEXTURE_ACK, { success: true, name });
+                // send to everyone in universe for runtime textures
+                if (univ.ownerId !== clientId && univ.world.players.size > 0) {
+                    univ.broadcastToAll(this, { type: MSG.TEXTURE_DATA, data: { name, mime: tex.mime, data: tex.data } });
+                }
+                break;
+            }
+
+            case MSG.UI_EVENT: {
+                if (!client.currentUniverse) break;
+                client.currentUniverse.fire('onUIEvent', {
+                    id: clientId,
+                    name: client.player.name,
+                    elementId: data.elementId || '',
+                    value: data.value
+                });
                 break;
             }
         }
@@ -346,6 +517,11 @@ class TcpGameServer {
         if (!this.running) return;
 
         setInterval(() => {
+            // Dispatch onTick to every universe's script (runs even when empty)
+            for (const [id, universe] of this.universes) {
+                universe.fire('onTick', 1 / this.tickRate);
+            }
+
             // Process inputs and send updates for all active universes
             for (const [id, universe] of this.universes) {
                 if (universe.world.players.size === 0) continue;

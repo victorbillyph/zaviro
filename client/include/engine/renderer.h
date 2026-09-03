@@ -30,9 +30,14 @@ public:
     void uiEnd();
     void drawRect(float x, float y, float w, float h, const Color& color);
     void drawText(const std::string& text, float x, float y, float scale, const Color& color);
+    void drawTexturedRect(float x, float y, float w, float h, unsigned int texture, const Color& tint);
     void setUiResolution(int width, int height);
     int getUiWidth() const { return m_uiWidth; }
     int getUiHeight() const { return m_uiHeight; }
+
+    // Runtime textures (decoded image -> GL texture)
+    unsigned int createTextureFromData(const unsigned char* data, int width, int height, int channels);
+    void deleteTexture(unsigned int texture);
 
     // Skybox
     void drawSkybox(const Vec3& cameraPosition);

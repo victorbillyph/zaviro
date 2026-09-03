@@ -29,6 +29,7 @@ class ServerNode {
     async init(opts = {}) {
         await this.ensureIdentity();
         this.socksPort = opts.socksPort || 19050;
+        this.torPath = opts.torPath || null;
 
         if (opts.tor !== false) {
             await this.startTor();
@@ -82,7 +83,8 @@ class ServerNode {
         const TorOpts = await Tor.startTor({
             servicePort: this.servicePort,
             socksPort: this.socksPort,
-            dataDir: process.env.ZAVIRO_TOR_DATA_DIR
+            dataDir: process.env.ZAVIRO_TOR_DATA_DIR,
+            torPath: this.torPath
         });
         this.onion = TorOpts.hostname;
         this.torProcess = TorOpts.process;
