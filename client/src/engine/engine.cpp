@@ -270,10 +270,9 @@ void Engine::onNetworkMessage(const NetworkMessage& msg) {
                 float sx = j["self"]["position"].value("x", 0.0f);
                 float sy = j["self"]["position"].value("y", 0.0f);
                 float sz = j["self"]["position"].value("z", 0.0f);
-                // Server authoritative — correct client prediction
-                m_player.transform.position.x += (sx - m_player.transform.position.x) * 0.5f;
-                m_player.transform.position.y = sy;  // snap Y (server controls gravity)
-                m_player.transform.position.z += (sz - m_player.transform.position.z) * 0.5f;
+                m_player.transform.position.x = sx;
+                m_player.transform.position.y = sy;
+                m_player.transform.position.z = sz;
             }
             break;
         }

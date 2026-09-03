@@ -8,8 +8,7 @@ Player::Player(uint64_t id, const std::string& name)
 }
 
 void Player::update(float dt) {
-    // No physics on client — server is authoritative.
-    // Client only does camera and sends input.
+    // No physics on client — server is authoritative for all position.
 }
 
 void Player::move(float forward, float right, float jump, float dt) {
@@ -40,10 +39,7 @@ void Player::move(float forward, float right, float jump, float dt) {
 
     m_velocity.x = wishDir.x * speed;
     m_velocity.z = wishDir.z * speed;
-
-    // Client-side prediction for horizontal only
-    transform.position.x += m_velocity.x * dt;
-    transform.position.z += m_velocity.z * dt;
+    // No local movement — server computes position and sends it back
 }
 
 void Player::setMouseDelta(float dx, float dy) {
