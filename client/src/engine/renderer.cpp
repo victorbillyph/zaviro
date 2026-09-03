@@ -743,7 +743,7 @@ void Renderer::drawText(const std::string& text, float x, float y, float scale, 
         int col = glyph % m_fontCols;
 
         float u0 = col * uStep;
-        float v0 = row * vStep;
+        float v0 = (m_fontCols - 1 - row) * vStep;
         float u1 = u0 + uStep;
         float v1 = v0 + vStep;
 
