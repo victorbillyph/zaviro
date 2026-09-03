@@ -82,8 +82,50 @@ bool Engine::initialize(const std::string& title, int width, int height, const s
 
     m_running = true;
     m_window->setCursorDisabled(false);
+    m_currentServerHost = serverHost;
+    m_currentServerPort = serverPort;
     std::cout << "Zaviro Engine initialized" << std::endl;
     return true;
+}
+
+void Engine::connectToServer(const std::string& host, int port) {
+    if (m_network.isConnected()) {
+        m_network.disconnect();
+    }
+    m_online = false;
+    m_serverList.clear();
+    m_universes.clear();
+    m_clientId = 0;
+    m_remotePlayers.clear();
+    m_gameState = GameState::LOBBY;
+
+    bool isOnion = host.size() >= 6 && host.rfind(".onion") == host.size() - 6;
+    if (isOnion) {
+        if (m_proxyHost.empty()) {
+            // Default Tor SOCKS proxy
+            m_proxyHost = "127.0.0.1";
+            m_proxyPort = 19050;
+        }
+        m_network.setProxy(m_proxyHost, m_proxyPort);
+        m_network.setUseProxy(true);
+        std::cout << "Connecting via Tor SOCKS proxy to " << host << ":" << port << std::endl;
+    } else {
+        m_network.setUseProxy(false);
+        std::cout << "Connecting directly to " << host << ":" << port << std::endl;
+    }
+
+    if (m_network.connect(host, port)) {
+        m_online = true;
+        m_network.setMessageCallback([this](const NetworkMessage& msg) {
+            onNetworkMessage(msg);
+        });
+        m_network.send(Proto::HELLO, json({{"name", "Player1"}}).dump());
+        m_currentServerHost = host;
+        m_currentServerPort = port;
+        std::cout << "Connected!" << std::endl;
+    } else {
+        std::cout << "Connection failed" << std::endl;
+    }
 }
 
 void Engine::onNetworkMessage(const NetworkMessage& msg) {
@@ -443,6 +485,26 @@ void Engine::handleLobbyClick(float mx, float my) {
             break;
         }
     }
+
+    // Server card clicks
+    float serverY = startY + (float)m_universes.size() * (cardH + gap) + 30.0f + 22.0f;
+    float serverCardW = 400.0f;
+    float serverCardH = 50.0f;
+
+    // Current server card (skip)
+    serverY += serverCardH + 6.0f;
+
+    // Remote server cards
+    for (size_t i = 0; i < m_serverList.size(); i++) {
+        if (mx >= startX && mx <= startX + serverCardW &&
+            my >= serverY && my <= serverY + serverCardH) {
+            const auto& s = m_serverList[i];
+            std::cout << "Connecting to server: " << s.name << " (" << s.onion << ")" << std::endl;
+            connectToServer(s.onion, 8765);
+            return;
+        }
+        serverY += serverCardH + 6.0f;
+    }
 }
 
 void Engine::renderLobby() {
@@ -521,16 +583,55 @@ void Engine::renderLobby() {
         m_renderer->drawText(status, startX + cardW - 80.0f, cy + 30.0f, 0.8f, statusColor);
     }
 
+    // Server list section
+    float serverY = startY + (float)m_universes.size() * (cardH + gap) + 30.0f;
+    m_renderer->drawText("Servidores", startX, serverY, 1.1f, Color(0.7f, 0.8f, 1.0f, 1.0f));
+    serverY += 22.0f;
+
+    float serverCardW = 400.0f;
+    float serverCardH = 50.0f;
+    m_hoveredServer = -1;
+
+    // Current server (always first)
+    {
+        bool hov = (m_mouseX >= startX && m_mouseX <= startX + serverCardW &&
+                    m_mouseY >= serverY && m_mouseY <= serverY + serverCardH);
+        if (hov) m_hoveredServer = 0;
+        m_renderer->drawRect(startX, serverY, serverCardW, serverCardH,
+            Color(hov ? 0.2f : 0.08f, hov ? 0.2f : 0.08f, 0.35f, 0.95f));
+        m_renderer->drawRect(startX, serverY, 4.0f, serverCardH, Color(0.3f, 0.8f, 0.3f, 1.0f));
+        std::string label = m_connectedServerName + " (conectado)";
+        m_renderer->drawText(label, startX + 14.0f, serverY + 15.0f, 1.0f, Color(0.3f, 0.9f, 0.3f, 1));
+        if (!m_serverPubKey.empty()) {
+            m_renderer->drawText(m_serverPubKey.substr(0, 16) + "...", startX + 14.0f, serverY + 32.0f, 0.7f, Color(0.5f, 0.7f, 0.9f, 0.7f));
+        }
+        serverY += serverCardH + 6.0f;
+    }
+
+    // Remote servers from federation
+    for (size_t i = 0; i < m_serverList.size(); i++) {
+        const auto& s = m_serverList[i];
+        bool hov = (m_mouseX >= startX && m_mouseX <= startX + serverCardW &&
+                    m_mouseY >= serverY && m_mouseY <= serverY + serverCardH);
+        if (hov) m_hoveredServer = (int)(i + 1);
+
+        Color cardBg(hov ? 0.2f : 0.08f, hov ? 0.15f : 0.08f, 0.12f, 0.95f);
+        m_renderer->drawRect(startX, serverY, serverCardW, serverCardH, cardBg);
+        m_renderer->drawRect(startX, serverY, 4.0f, serverCardH, Color(0.8f, 0.5f, 0.2f, 1.0f));
+
+        std::string sname = s.name.empty() ? s.onion.substr(0, 20) + "..." : s.name;
+        m_renderer->drawText(sname, startX + 14.0f, serverY + 8.0f, 1.0f, Color(1,1,1,1));
+        m_renderer->drawText(s.onion.substr(0, 30) + "...", startX + 14.0f, serverY + 26.0f, 0.7f, Color(0.6f, 0.7f, 0.9f, 0.8f));
+        serverY += serverCardH + 6.0f;
+    }
+
     // Bottom hints
     if (m_online) {
-        std::string conn = "Servidor: " + m_connectedServerName + " | Clique em um Universo para jogar";
+        std::string conn = "Clique em um Universo para jogar";
         if (!m_serverList.empty()) {
             conn += " | Rede: " + std::to_string(m_serverList.size() + 1) + " servidores";
         }
         m_renderer->drawText(conn, 10.0f, h - 22.0f, 0.9f, Color(0.4f, 0.8f, 0.4f, 0.8f));
-        if (!m_serverPubKey.empty()) {
-            m_renderer->drawText("ID: " + m_serverPubKey.substr(0, 12) + "...", 10.0f, h - 40.0f, 0.7f, Color(0.5f, 0.7f, 0.9f, 0.7f));
-        }
     } else {
         m_renderer->drawText("Offline - Servidor indisponivel", 10.0f, h - 22.0f, 0.9f, Color(0.8f, 0.3f, 0.3f, 0.8f));
     }

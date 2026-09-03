@@ -84,6 +84,13 @@ private:
     void runLobby();
     void renderLobby();
     void handleLobbyClick(float mouseX, float mouseY);
+    void connectToServer(const std::string& host, int port);
+
+    // Server list state
+    int m_hoveredServer = -1;
+    int m_selectedServer = -1;  // index of currently connected server in list
+    std::string m_currentServerHost;
+    int m_currentServerPort = 8765;
 
     // Game
     void runGame();
