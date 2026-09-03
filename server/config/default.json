@@ -1,0 +1,11 @@
+{
+  "server": {
+    "port": 8765,
+    "maxPlayers": 64,
+    "tickRate": 30
+  },
+  "world": {
+    "gravity": -20.0,
+    "maxEntities": 10000
+  }
+}

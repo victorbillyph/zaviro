@@ -1,0 +1,75 @@
+#include "game/player.h"
+#include <cmath>
+
+Player::Player(uint64_t id, const std::string& name)
+    : m_id(id), m_name(name) {
+    m_transform.scale = {1.0f, 1.0f, 1.0f};
+    transform.scale = {1.0f, 1.0f, 1.0f};
+}
+
+void Player::update(float dt) {
+    // Apply gravity
+    m_velocity.y += gravity * dt;
+
+    // Integrate vertical position
+    transform.position.y += m_velocity.y * dt;
+
+    // Ground collision (terrain is a heightmap)
+    float groundY = heightAt(transform.position.x, transform.position.z) + height;
+    if (transform.position.y <= groundY) {
+        transform.position.y = groundY;
+        m_velocity.y = 0.0f;
+        m_grounded = true;
+    } else {
+        m_grounded = false;
+    }
+}
+
+void Player::move(float forward, float right, float jump, float dt) {
+    float yawRad = m_yaw * 3.14159f / 180.0f;
+    float pitchRad = m_pitch * 3.14159f / 180.0f;
+
+    Vec3 front{
+        cosf(pitchRad) * cosf(yawRad),
+        sinf(pitchRad),
+        cosf(pitchRad) * sinf(yawRad)
+    };
+    front = front.normalized();
+
+    // Movement direction projected onto horizontal plane
+    Vec3 frontH{front.x, 0.0f, front.z};
+    frontH = frontH.normalized();
+
+    Vec3 rightVec = Vec3{
+        cosf(yawRad - 3.14159f/2.0f),
+        0.0f,
+        sinf(yawRad - 3.14159f/2.0f)
+    }.normalized();
+
+    // Horizontal movement (flattened to ground plane, no fly)
+    Vec3 wishDir = frontH * forward + rightVec * right;
+    float wishLen = sqrtf(wishDir.x*wishDir.x + wishDir.z*wishDir.z);
+    if (wishLen > 1.0f) {
+        wishDir = wishDir * (1.0f / wishLen); // normalize
+    }
+
+    m_velocity.x = wishDir.x * speed;
+    m_velocity.z = wishDir.z * speed;
+
+    // Jump
+    if (jump > 0.0f && m_grounded) {
+        m_velocity.y = jumpVelocity;
+        m_grounded = false;
+    }
+
+    transform.position.x += m_velocity.x * dt;
+    transform.position.z += m_velocity.z * dt;
+}
+
+void Player::setMouseDelta(float dx, float dy) {
+    m_yaw += dx * sensitivity;
+    m_pitch -= dy * sensitivity;
+
+    if (m_pitch > 89.0f) m_pitch = 89.0f;
+    if (m_pitch < -89.0f) m_pitch = -89.0f;
+}

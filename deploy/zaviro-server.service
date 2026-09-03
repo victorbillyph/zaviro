@@ -1,0 +1,28 @@
+[Unit]
+Description=Zaviro Game Server (Node.js)
+After=network.target
+
+[Service]
+Type=simple
+User=victor
+Group=victor
+WorkingDirectory=/home/victor/Zaviro/server
+ExecStart=/usr/bin/node /home/victor/Zaviro/server/src/index.js
+Restart=on-failure
+RestartSec=3
+
+# Environment
+Environment=NODE_ENV=production
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
