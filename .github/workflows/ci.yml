@@ -94,7 +94,7 @@ jobs:
           cp release/zaviro_client dist/client/
           tar czf zaviro-client-linux-${VERSION}.tar.gz -C dist client
           # Server tarball (from repo source, exclude node_modules)
-          tar czf zaviro-server-${VERSION}.tar.gz server --exclude='server/node_modules'
+          tar czf zaviro-server-${VERSION}.tar.gz --exclude='server/node_modules' server
           ls -la *.tar.gz
 
       - name: Create Release
