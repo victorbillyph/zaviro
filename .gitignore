@@ -1,7 +1,9 @@
 # Build artifacts
 client/build/
+client/build-win64/
 *.o
 *.a
+*.exe
 
 # Node
 server/node_modules/
