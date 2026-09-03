@@ -24,6 +24,15 @@ public:
     void disconnect();
     bool isConnected() const { return m_connected; }
 
+    // Tor SOCKS5 proxy support (used to reach .onion servers).
+    void setProxy(const std::string& proxyHost, int proxyPort) {
+        m_proxyHost = proxyHost;
+        m_proxyPort = proxyPort;
+        m_useProxy = !proxyHost.empty();
+    }
+    void setUseProxy(bool use) { m_useProxy = use; }
+    bool isUsingProxy() const { return m_useProxy; }
+
     void send(uint16_t type, const std::string& data);
     void setMessageCallback(MessageCallback cb) { m_callback = cb; }
 
@@ -31,6 +40,7 @@ public:
 
 private:
     void receiveLoop();
+    bool performSocks5Handshake(int sock, const std::string& host, int port);
 
     std::thread m_receiveThread;
     std::mutex m_mutex;
@@ -40,4 +50,8 @@ private:
     MessageCallback m_callback;
 
     void* m_client = nullptr;
+
+    bool m_useProxy = false;
+    std::string m_proxyHost;
+    int m_proxyPort = 9050;
 };

@@ -27,6 +27,8 @@ const MSG = {
     CHAT_BROADCAST: 107,
     UNIVERSE_LIST: 108,
     UNIVERSE_JOINED: 109,
+    SERVER_LIST: 110,
+    SERVER_INFO: 111,
 };
 
 class TcpGameServer {
@@ -122,11 +124,15 @@ class TcpGameServer {
         // Send welcome
         this.send(client, MSG.WELCOME, {
             clientId: clientId,
-            playerName: client.player.name
+            playerName: client.player.name,
+            server: this.getServerInfo()
         });
 
         // Send universe list
         this.sendUniverseList(client);
+
+        // Send federation server list (multi-server support)
+        this.sendServerList(client);
 
         socket.on('data', (data) => {
             this.handleData(client, data);
@@ -388,6 +394,29 @@ class TcpGameServer {
                 this.send(client, msg.type, msg.data);
             }
         }
+    }
+
+    getServerInfo() {
+        return {
+            host: this.onionAddress || ('127.0.0.1:' + this.port),
+            port: this.port,
+            onion: this.onionAddress || null,
+            name: this.serverName || 'Zaviro Server',
+            players: this.clients.size,
+            maxPlayers: this.maxPlayers,
+            pubKey: this.node ? this.node.identity.pubHex : null
+        };
+    }
+
+    sendServerList(client) {
+        const list = (this.peerServers || []).map((p) => ({
+            onion: p.onion,
+            name: p.name || 'unknown',
+            region: p.region || '',
+            pubKey: p.pubKey,
+            icon: p.icon || null
+        }));
+        this.send(client, MSG.SERVER_LIST, { servers: list });
     }
 
     shutdown() {

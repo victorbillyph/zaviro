@@ -36,6 +36,12 @@ bool Engine::initialize(const std::string& title, int width, int height, const s
 
     // Network
     std::cout << "Connecting to server at " << serverHost << ":" << serverPort << "..." << std::endl;
+    bool isOnion = serverHost.size() >= 8 && serverHost.rfind(".onion") == serverHost.size() - 6;
+    if (isOnion && !m_proxyHost.empty()) {
+        m_network.setProxy(m_proxyHost, m_proxyPort);
+        m_network.setUseProxy(true);
+        std::cout << "Connecting via Tor SOCKS proxy " << m_proxyHost << ":" << m_proxyPort << std::endl;
+    }
     if (m_network.connect(serverHost, serverPort)) {
         std::cout << "Connected to server!" << std::endl;
         m_online = true;
@@ -62,7 +68,28 @@ void Engine::onNetworkMessage(const NetworkMessage& msg) {
     switch (msg.type) {
         case Proto::WELCOME:
             m_clientId = j.value("clientId", 0);
+            if (j.contains("server")) {
+                m_connectedServerName = j["server"].value("name", "Zaviro Server");
+                if (j["server"].contains("pubKey")) {
+                    m_serverPubKey = j["server"].value("pubKey", "");
+                }
+            }
             break;
+
+        case Proto::SERVER_LIST: {
+            m_serverList.clear();
+            if (j.contains("servers") && j["servers"].is_array()) {
+                for (const auto& s : j["servers"]) {
+                    RemoteServer rs;
+                    rs.onion = s.value("onion", "");
+                    rs.name = s.value("name", "unknown");
+                    rs.region = s.value("region", "");
+                    rs.pubKey = s.value("pubKey", "");
+                    if (!rs.onion.empty()) m_serverList.push_back(rs);
+                }
+            }
+            break;
+        }
 
         case Proto::UNIVERSE_LIST: {
             m_universes.clear();
@@ -353,7 +380,14 @@ void Engine::renderLobby() {
 
     // Bottom hints
     if (m_online) {
-        m_renderer->drawText("Conectado ao servidor | Clique em um Universo para jogar", 10.0f, h - 22.0f, 0.9f, Color(0.4f, 0.8f, 0.4f, 0.8f));
+        std::string conn = "Servidor: " + m_connectedServerName + " | Clique em um Universo para jogar";
+        if (!m_serverList.empty()) {
+            conn += " | Rede: " + std::to_string(m_serverList.size() + 1) + " servidores";
+        }
+        m_renderer->drawText(conn, 10.0f, h - 22.0f, 0.9f, Color(0.4f, 0.8f, 0.4f, 0.8f));
+        if (!m_serverPubKey.empty()) {
+            m_renderer->drawText("ID: " + m_serverPubKey.substr(0, 12) + "...", 10.0f, h - 40.0f, 0.7f, Color(0.5f, 0.7f, 0.9f, 0.7f));
+        }
     } else {
         m_renderer->drawText("Offline - Servidor indisponivel", 10.0f, h - 22.0f, 0.9f, Color(0.8f, 0.3f, 0.3f, 0.8f));
     }

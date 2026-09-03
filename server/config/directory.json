@@ -1,0 +1,6 @@
+{
+  "port": 8766,
+  "difficulty": 18,
+  "dataDir": "/tmp/zaviro-directory",
+  "socksPort": 19050
+}

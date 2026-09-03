@@ -1,6 +1,7 @@
 #include "network/client.h"
 #include <iostream>
 #include <cstring>
+#include <vector>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -10,6 +11,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -27,13 +29,36 @@ bool NetworkClient::connect(const std::string& host, int port) {
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
 #endif
 
+    // Determine what to actually dial.
+    // When a SOCKS5 proxy is configured (Tor), we connect to the proxy and
+    // ask it to reach host:port (supports .onion domains). Otherwise direct.
+    std::string dialHost = host;
+    int dialPort = port;
+
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return false;
 
+    if (m_useProxy) {
+        dialHost = m_proxyHost;
+        dialPort = m_proxyPort;
+    }
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+    addr.sin_port = htons(dialPort);
+    if (inet_pton(AF_INET, dialHost.c_str(), &addr.sin_addr) != 1) {
+        // try resolving via getaddrinfo
+        struct hostent* he = gethostbyname(dialHost.c_str());
+        if (!he) {
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return false;
+        }
+        memcpy(&addr.sin_addr, he->h_addr, he->h_length);
+    }
 
     if (::connect(sock, (sockaddr*)&addr, sizeof(addr)) < 0) {
 #ifdef _WIN32
@@ -44,9 +69,61 @@ bool NetworkClient::connect(const std::string& host, int port) {
         return false;
     }
 
+    // If using a proxy, perform the SOCKS5 CONNECT handshake to the real target.
+    if (m_useProxy) {
+        if (!performSocks5Handshake(sock, host, port)) {
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return false;
+        }
+    }
+
     m_client = (void*)(intptr_t)sock;
     m_connected = true;
     m_receiveThread = std::thread(&NetworkClient::receiveLoop, this);
+    return true;
+}
+
+bool NetworkClient::performSocks5Handshake(int sock, const std::string& host, int port) {
+    // Greeting: ver=5, nmethods=1, method=0x00 (no auth)
+    const unsigned char greeting[3] = {0x05, 0x01, 0x00};
+    if (::send(sock, (const char*)greeting, 3, MSG_NOSIGNAL) != 3) return false;
+
+    unsigned char reply[2];
+    if (::recv(sock, (char*)reply, 2, MSG_WAITALL) != 2) return false;
+    if (reply[0] != 0x05 || reply[1] != 0x00) return false; // no acceptable auth
+
+    // CONNECT request with domain name (ATYP=0x03)
+    unsigned char req[4] = {0x05, 0x01, 0x00, 0x03};
+    std::vector<unsigned char> reqv;
+    reqv.insert(reqv.end(), req, req + 4);
+    size_t hostLen = host.size();
+    if (hostLen > 255) return false;
+    reqv.push_back((unsigned char)hostLen);
+    reqv.insert(reqv.end(), host.begin(), host.end());
+    reqv.push_back((port >> 8) & 0xFF);
+    reqv.push_back(port & 0xFF);
+
+    if (::send(sock, (const char*)reqv.data(), (int)reqv.size(), MSG_NOSIGNAL) != (int)reqv.size()) return false;
+
+    unsigned char hdr[4];
+    if (::recv(sock, (char*)hdr, 4, MSG_WAITALL) != 4) return false;
+    if (hdr[1] != 0x00) return false; // connect failed
+
+    // Parse remaining address based on ATYP
+    unsigned char atyp = hdr[3];
+    int addrLen = (atyp == 0x01) ? 4 : (atyp == 0x04) ? 16 : (atyp == 0x03) ? 1 : 0;
+    std::vector<unsigned char> rest(addrLen + 2);
+    if (::recv(sock, (char*)rest.data(), (int)rest.size(), MSG_WAITALL) != (int)rest.size()) return false;
+    if (atyp == 0x03) {
+        int domainLen = rest[0];
+        std::vector<unsigned char> domain(domainLen + 2);
+        if (::recv(sock, (char*)domain.data(), (int)domain.size(), MSG_WAITALL) != (int)domain.size()) return false;
+    }
+
     return true;
 }
 

@@ -7,5 +7,19 @@
   "world": {
     "gravity": -20.0,
     "maxEntities": 10000
+  },
+  "tor": {
+    "enabled": true,
+    "socksPort": 19050,
+    "dataDir": "/tmp/zaviro-server-tor"
+  },
+  "federation": {
+    "enabled": true,
+    "difficulty": 18,
+    "announceIntervalSec": 120,
+    "directory": {
+      "onion": "",
+      "socksPort": 19050
+    }
   }
 }

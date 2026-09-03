@@ -24,4 +24,6 @@ namespace Proto {
     constexpr uint16_t CHAT_BROADCAST = 107;
     constexpr uint16_t UNIVERSE_LIST = 108;
     constexpr uint16_t UNIVERSE_JOINED = 109;
+    constexpr uint16_t SERVER_LIST = 110;
+    constexpr uint16_t SERVER_INFO = 111;
 }

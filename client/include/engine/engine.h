@@ -31,6 +31,13 @@ struct UniverseInfo {
     int seed = 0;
 };
 
+struct RemoteServer {
+    std::string onion;
+    std::string name;
+    std::string region;
+    std::string pubKey;
+};
+
 enum class GameState {
     LOBBY,
     LOADING,
@@ -54,6 +61,9 @@ public:
     bool isOnline() const { return m_network.isConnected(); }
     GameState getGameState() const { return m_gameState; }
     void stop() { m_running = false; }
+
+    // Tor SOCKS proxy for connecting to .onion servers.
+    void setTorProxy(const std::string& proxyHost, int proxyPort) { m_proxyHost = proxyHost; m_proxyPort = proxyPort; }
 
 private:
     Engine() = default;
@@ -84,7 +94,15 @@ private:
     bool m_wantJoin = false;
 
     std::vector<UniverseInfo> m_universes;
+    std::vector<RemoteServer> m_serverList;
+    std::string m_connectedServerName = "Zaviro Server";
+    std::string m_serverPubKey;
+    std::vector<RemoteServer> m_federationList;
     bool m_online = false;
+
+    std::string m_proxyHost;
+    int m_proxyPort = 9050;
+    bool m_useProxy = false;
 
     bool m_running = false;
 };
